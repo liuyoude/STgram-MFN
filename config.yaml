@@ -1,0 +1,63 @@
+# dir / file
+model_dir: ./model_param
+result_dir: ./result
+result_file: result.csv
+data_dir: ../../data/dataset
+pre_data_dir: ../../data/pre_data
+
+data_type:
+domain: source
+split_flag: False
+thread_num: 200
+process_machines:
+  - pump
+  - slider
+  - fan
+  - valve
+  - ToyCar
+  - ToyConveyor
+
+#process_machines:
+#  - pump
+
+# p_AUC
+max_fpr: 0.1
+
+# feature
+sr: 16000
+n_mels: 128 # 128
+frames: 313
+skip_frames: 1
+n_fft: 1024
+hop_length: 512
+win_length: 1024
+power: 2.0
+
+# train
+epochs: 500
+batch_size: 128
+workers: 16
+lr: 0.0001
+wd: 1e-6
+cuda: True
+gpu_id: 0
+
+
+
+# loss
+lamda: 0
+
+# score_compute
+pool_type: mean # mean,max,max_frames_mean,gwrp
+calculate_type: rec_mse # rec_mse,rec_z_mse
+gwrp_decay: 0.96
+score_lamda: 0.3
+
+ID_factor: {
+       fan: 0,
+       pump: 1,
+       slider: 2,
+       valve: 3,
+       ToyCar: 4,
+       ToyConveyor: 5,
+}

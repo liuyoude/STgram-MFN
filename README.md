@@ -1,0 +1,1 @@
+# STgram with MobileFaceNet for Anomalous Sound Detection
