@@ -12,18 +12,17 @@ import librosa
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-import spafe.fbanks.gammatone_fbanks as gf
-import torch.nn.functional as F
-from torch.cuda.amp import GradScaler, autocast
 # from torch.utils.tensorboard import SummaryWriter
 from visdom import Visdom
 from tqdm import tqdm
 from data_func.view_generator import ViewGenerator
-from utils import accuracy, save_checkpoint, get_machine_id_list, create_test_file_list, log_mel_spect_to_vector, calculate_anomaly_score, file_to_wav_vector
-
+from utils import accuracy, save_checkpoint, get_machine_id_list, create_test_file_list, log_mel_spect_to_vector, \
+    calculate_anomaly_score, file_to_wav_vector
 
 import utils
-torch.manual_seed(0)
+
+
+# torch.manual_seed(666)
 
 
 class wave_Mel_MFN_trainer(object):
@@ -34,13 +33,12 @@ class wave_Mel_MFN_trainer(object):
         self.id_factor = kwargs['id_fctor']
         self.machine_type = os.path.split(self.data_dir)[1]
         self.classifier = kwargs['classifier'].to(self.args.device)
-        self.arcface = kwargs['arcface']
-        if self.arcface is not None:
-            self.arcface = self.arcface.to(self.args.device)
-        # self.loss_layer = kwargs['loss_layer'].to(self.args.device)
         self.optimizer = kwargs['optimizer']
         self.scheduler = kwargs['scheduler']
-        self.writer = Visdom(env=self.args.version)
+        visdom_folder = f'./log/'
+        os.makedirs(visdom_folder, exist_ok=True)
+        visdom_path = os.path.join(visdom_folder, f'{self.args.version}_visdom_ft.log')
+        self.writer = Visdom(env=self.args.version, log_to_filename=visdom_path)
         self.criterion = torch.nn.CrossEntropyLoss().to(self.args.device)
         self.recon_criterion = torch.nn.L1Loss().to(self.args.device)
 
@@ -48,13 +46,10 @@ class wave_Mel_MFN_trainer(object):
 
     def train(self, train_loader):
         # self.eval()
-
-        # scaler = GradScaler(enabled=self.args.fp16_precision)
-
         n_iter = 0
 
         # create model dir for saving
-        os.makedirs(os.path.join(self.args.model_dir, self.args.version, 'Train'), exist_ok=True)
+        os.makedirs(os.path.join(self.args.model_dir, self.args.version, 'fine-tune'), exist_ok=True)
 
         print(f"Start classifier training for {self.args.epochs} epochs.")
         print(f"Training with gpu: {self.args.disable_cuda}.")
@@ -71,14 +66,10 @@ class wave_Mel_MFN_trainer(object):
                 melspec = melspec.float().to(self.args.device)
                 labels = labels.long().squeeze().to(self.args.device)
                 self.classifier.train()
-                predict_ids, _ = self.classifier(waveform, melspec)
-                if self.arcface is not None:
-                    self.arcface.train()
-                    predict_ids = self.arcface(predict_ids, labels)
-                loss_clf = self.criterion(predict_ids, labels)
-                loss =  loss_clf
+                predict_ids, _ = self.classifier(waveform, melspec, labels)
+                loss = self.criterion(predict_ids, labels)
                 pbar.set_description(f'Epoch:{epoch_counter}'
-                                     f'\tLclf:{loss_clf.item():.5f}\t')
+                                     f'\tLclf:{loss.item():.5f}\t')
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -106,62 +97,53 @@ class wave_Mel_MFN_trainer(object):
             if self.scheduler is not None and epoch_counter >= 20:
                 self.scheduler.step()
             print(f"Epoch: {epoch_counter}\tLoss: {loss}")
-
-            # save model checkpoints
-            auc, pauc = self.eval()
-            self.writer.line([[auc, pauc]], [epoch_counter], win=self.machine_type,
-                             update='append',
-                             opts=dict(
-                                 title=self.machine_type,
-                                 legend=['AUC_clf', 'pAUC_clf']
-                             ))
-            print(f'{self.machine_type}\t[{epoch_counter}/{self.args.epochs}]\tAUC: {auc:3.3f}\tpAUC: {pauc:3.3f}')
-            if (auc + pauc) > best_auc:
-                no_better = 0
-                best_auc = pauc + auc
-                p = pauc
-                a = auc
-                e = epoch_counter
-                checkpoint_name = 'checkpoint_best.pth.tar'
-                if self.arcface is not None:
-                    save_checkpoint({
-                        'epoch': epoch_counter,
-                        'clf_state_dict': self.classifier.state_dict(),
-                        'arcface_state_dict': self.arcface.state_dict(),
-                        'optimizer': self.optimizer.state_dict(),
-                    }, is_best=False,
-                        filename=os.path.join(self.args.model_dir, self.args.version, 'Train', checkpoint_name))
-                else:
+            if epoch_counter % 2 == 0:
+                # save model checkpoints
+                auc, pauc = self.eval()
+                self.writer.line([[auc, pauc]], [epoch_counter], win=self.machine_type,
+                                 update='append',
+                                 opts=dict(
+                                     title=self.machine_type,
+                                     legend=['AUC_clf', 'pAUC_clf']
+                                 ))
+                print(f'{self.machine_type}\t[{epoch_counter}/{self.args.epochs}]\tAUC: {auc:3.3f}\tpAUC: {pauc:3.3f}')
+                if (auc + pauc) > best_auc:
+                    no_better = 0
+                    best_auc = pauc + auc
+                    p = pauc
+                    a = auc
+                    e = epoch_counter
+                    checkpoint_name = 'checkpoint_best.pth.tar'
                     save_checkpoint({
                         'epoch': epoch_counter,
                         'clf_state_dict': self.classifier.state_dict(),
                         'optimizer': self.optimizer.state_dict(),
                     }, is_best=False,
-                        filename=os.path.join(self.args.model_dir, self.args.version, 'Train', checkpoint_name))
+                        filename=os.path.join(self.args.model_dir, self.args.version, 'fine-tune', checkpoint_name))
             else:
                 no_better += 1
-            # if no_better > 10:
+            # if no_better > self.args.early_stop:
             #     break
 
-            if epoch_counter % 10 == 0:
-                checkpoint_name = 'checkpoint_{:04d}.pth.tar'.format(epoch_counter)
-                save_checkpoint({
-                    'epoch': epoch_counter,
-                    'clf_state_dict': self.classifier.state_dict(),
-                    'optimizer': self.optimizer.state_dict(),
-                }, is_best=False,
-                    filename=os.path.join(self.args.model_dir, self.args.version, 'Train', checkpoint_name))
+            # if epoch_counter % 10 == 0:
+            #     checkpoint_name = 'checkpoint_{:04d}.pth.tar'.format(epoch_counter)
+            #     save_checkpoint({
+            #         'epoch': epoch_counter,
+            #         'clf_state_dict': self.classifier.state_dict(),
+            #         'optimizer': self.optimizer.state_dict(),
+            #     }, is_best=False,
+            #         filename=os.path.join(self.args.model_dir, self.args.version, 'fine-tune', checkpoint_name))
 
         print(f'Traing {self.machine_type} completed!\tBest Epoch: {e:4d}\tBest AUC: {a:3.3f}\tpAUC: {p:3.3f}')
 
     def eval(self):
-        sum_auc, sum_pauc, num = 0, 0, 0
+        sum_auc, sum_pauc, num, total_time = 0, 0, 0, 0
         #
         # sum_auc_r, sum_pauc_r = 0, 0
         dirs = utils.select_dirs(self.data_dir, data_type='')
         print('\n' + '=' * 20)
         for index, target_dir in enumerate(sorted(dirs)):
-            time.sleep(1)
+            start = time.perf_counter()
             machine_type = os.path.split(target_dir)[1]
             if machine_type not in self.args.process_machines:
                 continue
@@ -182,34 +164,26 @@ class wave_Mel_MFN_trainer(object):
                     else:
                         id = int(id_str[0][-1])
                     label = int(self.id_factor[machine_type] * 7 + id)
-                    labels = torch.from_numpy(np.array(label)).long()
+                    labels = torch.from_numpy(np.array(label)).long().to(self.args.device)
                     (x, _) = librosa.core.load(file_path, sr=self.args.sr, mono=True)
 
                     x_wav = x[None, None, :self.args.sr * 10]  # (1, audio_length)
                     x_wav = torch.from_numpy(x_wav)
-                    x_wav = x_wav.float()
+                    x_wav = x_wav.float().to(self.args.device)
 
                     x_mel = x[:self.args.sr * 10]  # (1, audio_length)
                     x_mel = torch.from_numpy(x_mel)
                     x_mel = ViewGenerator(self.args.sr,
-                                      n_fft=self.args.n_fft,
-                                      n_mels=self.args.n_mels,
-                                      win_length=self.args.win_length,
-                                      hop_length=self.args.hop_length,
-                                      power=self.args.power,
-                                      )(x_mel).unsqueeze(0).unsqueeze(0)
-
+                                          n_fft=self.args.n_fft,
+                                          n_mels=self.args.n_mels,
+                                          win_length=self.args.win_length,
+                                          hop_length=self.args.hop_length,
+                                          power=self.args.power,
+                                          )(x_mel).unsqueeze(0).unsqueeze(0).to(self.args.device)
 
                     with torch.no_grad():
                         self.classifier.eval()
-                        predict_ids, _ = self.classifier(x_wav, x_mel)
-                        if self.arcface is not None:
-                            self.arcface.eval()
-                            predict_ids = predict_ids.repeat(2, 1)
-                            labels = labels.repeat(2)
-                            predict_ids = self.arcface(predict_ids, labels)
-                            predict_ids = predict_ids[0:1, :]
-
+                        predict_ids, _ = self.classifier.module(x_wav, x_mel, labels)
                     probs = - torch.log_softmax(predict_ids, dim=1).mean(dim=0).squeeze().cpu().numpy()
                     y_pred[file_idx] = probs[label]
 
@@ -225,6 +199,11 @@ class wave_Mel_MFN_trainer(object):
             # print(machine_type, 'AUC_clf:', mean_auc, 'pAUC_clf:', mean_p_auc)
             sum_auc += mean_auc
             sum_pauc += mean_p_auc
+
+            time_nedded = time.perf_counter() - start
+            total_time += time_nedded
+            print(f'Test {machine_type} cost {time_nedded} secs')
+        print(f'Total test time: {total_time} secs!')
         return sum_auc / num, sum_pauc / num
 
     def test(self, save=True):
@@ -260,12 +239,12 @@ class wave_Mel_MFN_trainer(object):
                     else:
                         id = int(id_str[-1])
                     label = int(self.id_factor[machine_type] * 7 + id)
-                    labels = torch.from_numpy(np.array(label)).long()
+                    labels = torch.from_numpy(np.array(label)).long().to(self.args.device)
                     (x, _) = librosa.core.load(file_path, sr=self.args.sr, mono=True)
 
                     x_wav = x[None, None, :self.args.sr * 10]  # (1, audio_length)
                     x_wav = torch.from_numpy(x_wav)
-                    x_wav = x_wav.float()
+                    x_wav = x_wav.float().to(self.args.device)
 
                     x_mel = x[:self.args.sr * 10]  # (1, audio_length)
                     x_mel = torch.from_numpy(x_mel)
@@ -275,19 +254,12 @@ class wave_Mel_MFN_trainer(object):
                                           win_length=self.args.win_length,
                                           hop_length=self.args.hop_length,
                                           power=self.args.power,
-                                          )(x_mel).unsqueeze(0).unsqueeze(0)
+                                          )(x_mel).unsqueeze(0).unsqueeze(0).to(self.args.device)
 
                     with torch.no_grad():
                         self.classifier.eval()
-                        predict_ids, feature = self.classifier(x_wav, x_mel)
-                        if self.arcface is not None:
-                            self.arcface.eval()
-                            predict_ids = predict_ids.repeat(2, 1)
-                            labels = labels.repeat(2)
-                            predict_ids = self.arcface(predict_ids, labels)
-                            predict_ids = predict_ids[0:1, :]
+                        predict_ids, feature = self.classifier.module(x_wav, x_mel, labels)
                     probs = - torch.log_softmax(predict_ids, dim=1).mean(dim=0).squeeze().cpu().numpy()
-
                     y_pred[file_idx] = probs[label]
                     anomaly_score_list.append([os.path.basename(file_path), y_pred[file_idx]])
                 if save:
@@ -337,7 +309,7 @@ class wave_Mel_MFN_trainer(object):
         mel = mel.cpu().squeeze().flip(dims=(0,)).numpy()
         print(mel.shape)
         cmap = ['magma', 'inferno', 'plasma', 'hot']
-        index=1
+        index = 1
         plt.imshow(mel, cmap=cmap[index])
         plt.axis('off')
         plt.show()

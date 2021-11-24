@@ -56,6 +56,13 @@ def select_dirs(data_dir, data_type='dev_data'):
     dirs = glob.glob(dir_path)
     return dirs
 
+def replay_visdom(writer, log_path):
+    file_path = os.path.abspath(f'{log_path}/*')
+    files = glob.glob(file_path)
+    for file in files:
+        writer.replay_log(file)
+
+
 def create_file_list(target_dir,
                      dir_name='train',
                      ext='wav'):

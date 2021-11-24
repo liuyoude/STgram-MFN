@@ -6,25 +6,26 @@ from torch.autograd import Variable
 import math
 from torch.nn import Parameter
 
+
 class Bottleneck(nn.Module):
     def __init__(self, inp, oup, stride, expansion):
         super(Bottleneck, self).__init__()
         self.connect = stride == 1 and inp == oup
         #
         self.conv = nn.Sequential(
-            #pw
+            # pw
             nn.Conv2d(inp, inp * expansion, 1, 1, 0, bias=False),
             nn.BatchNorm2d(inp * expansion),
             nn.PReLU(inp * expansion),
             # nn.ReLU(inplace=True),
 
-            #dw
+            # dw
             nn.Conv2d(inp * expansion, inp * expansion, 3, stride, 1, groups=inp * expansion, bias=False),
             nn.BatchNorm2d(inp * expansion),
             nn.PReLU(inp * expansion),
             # nn.ReLU(inplace=True),
 
-            #pw-linear
+            # pw-linear
             nn.Conv2d(inp * expansion, oup, 1, 1, 0, bias=False),
             nn.BatchNorm2d(oup),
         )
@@ -34,6 +35,7 @@ class Bottleneck(nn.Module):
             return x + self.conv(x)
         else:
             return self.conv(x)
+
 
 class ConvBlock(nn.Module):
     def __init__(self, inp, oup, k, s, p, dw=False, linear=False):
@@ -46,6 +48,7 @@ class ConvBlock(nn.Module):
         self.bn = nn.BatchNorm2d(oup)
         if not linear:
             self.prelu = nn.PReLU(oup)
+
     def forward(self, x):
         x = self.conv(x)
         x = self.bn(x)
@@ -53,6 +56,7 @@ class ConvBlock(nn.Module):
             return x
         else:
             return self.prelu(x)
+
 
 Mobilefacenet_bottleneck_setting = [
     # t, c , n ,s
@@ -74,23 +78,19 @@ Mobilenetv2_bottleneck_setting = [
     [6, 320, 1, 1],
 ]
 
+
 class TgramNet(nn.Module):
-    def __init__(self, l=3, frames=313, mel_bins=128, win_len=1024, hop_len=512):
+    def __init__(self, num_layer=3, mel_bins=128, win_len=1024, hop_len=512):
         super(TgramNet, self).__init__()
         # if "center=True" of stft, padding = win_len / 2
-        self.conv_extrctor = nn.Conv1d(1, mel_bins, win_len, hop_len, win_len//2, bias=False)
-
-        en_layers = []
-        for i in range(l):
-                en_layers.append(nn.Sequential(
-                    nn.LayerNorm(frames),
-                    nn.LeakyReLU(0.2, inplace=True),
-                    nn.Conv1d(mel_bins, mel_bins, 3, 1, 1, bias=False)
-                    )
-                )
-        self.conv_encoder = nn.Sequential(*en_layers)
-
-
+        self.conv_extrctor = nn.Conv1d(1, mel_bins, win_len, hop_len, win_len // 2, bias=False)
+        self.conv_encoder = nn.Sequential(
+            *[nn.Sequential(
+                nn.LayerNorm([mel_bins]),
+                nn.LeakyReLU(0.2, inplace=True),
+                nn.Conv1d(mel_bins, mel_bins, 3, 1, 1, bias=False)
+            ) for _ in range(num_layer)])
+        self.tgramnet.init_weight()
 
     def forward(self, x):
         out = self.conv_extrctor(x)
@@ -98,30 +98,20 @@ class TgramNet(nn.Module):
         return out
 
     def init_weight(self):
-        print(1)
         for m in self.modules():
-
             if isinstance(m, nn.Conv1d):
-                nn.init.kaiming_uniform_(m.weight)
+                nn.init.xavier_uniform_(m.weight)
             if isinstance(m, nn.LayerNorm):
-                m.weight.data.fill_(1.)
-                m.bias.data.zero_()
+                nn.init.constant_(m.bias, 0)
+                nn.init.constant_(m.weight, 1.0)
 
 
-
-
-
-
-class MelMobileFacenet(nn.Module):
-    def __init__(self,num_class, c_dim=128, t_dim=313,
-                 win_len = 1024,
-                 hop_len = 512,
+class MobileFaceNet(nn.Module):
+    def __init__(self,
+                 num_class,
                  bottleneck_setting=Mobilefacenet_bottleneck_setting,
-                 arcface=False, v_tfe=False):
-        super(MelMobileFacenet, self).__init__()
-        self.arcface = arcface
-        self.v_tfe = v_tfe
-        self.tgramnet = TgramNet(mel_bins=c_dim, frames=t_dim, win_len=win_len, hop_len=hop_len)
+                 arcface=None):
+        super(MobileFaceNet, self).__init__()
 
         self.conv1 = ConvBlock(2, 64, 3, 2, 1)
 
@@ -138,9 +128,11 @@ class MelMobileFacenet(nn.Module):
         self.linear1 = ConvBlock(512, 128, 1, 1, 0, linear=True)
 
         self.fc_out = nn.Linear(128, num_class)
-
+        self.arcface = arcface
         # init
-        self.tgramnet.init_weight()
+        self.init_weight()
+
+    def init_weight(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
@@ -161,12 +153,7 @@ class MelMobileFacenet(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def forward(self, x_wav, x_mel):
-        x_wav = self.tgramnet(x_wav).unsqueeze(1)
-
-        if self.v_tfe:
-            return x_wav, x_mel
-        x = torch.cat((x_mel, x_wav), dim=1)
+    def forward(self, x, label):
         x = self.conv1(x)
         x = self.dw_conv1(x)
         x = self.blocks(x)
@@ -175,11 +162,33 @@ class MelMobileFacenet(nn.Module):
         x = self.linear7(x)
         x = self.linear1(x)
         feature = x.view(x.size(0), -1)
-        if self.arcface:
-            out = feature
+        if self.arcface is not None:
+            out = self.arcface(feature, label)
         else:
             out = self.fc_out(feature)
+        return out, feature
 
+
+class STgramMFN(nn.Module):
+    def __init__(self, num_class,
+                 c_dim=128,
+                 win_len=1024,
+                 hop_len=512,
+                 bottleneck_setting=Mobilenetv2_bottleneck_setting,
+                 arcface=None):
+        super(STgramMFN, self).__init__()
+        self.arcface = arcface
+        self.tgramnet = TgramNet(mel_bins=c_dim, win_len=win_len, hop_len=hop_len)
+        self.mobilefacenet = MobileFaceNet(num_class=num_class,
+                                           bottleneck_setting=bottleneck_setting,
+                                           arcface=arcface)
+    def get_sgram(self, x_wav):
+        return self.tgramnet(x_wav)
+
+    def forward(self, x_wav, x_mel, label):
+        x_wav = self.tgramnet(x_wav).unsqueeze(1)
+        x = torch.cat((x_mel, x_wav), dim=1)
+        out, feature = self.mobilefacenet(x, label)
         return out, feature
 
 class ArcMarginProduct(nn.Module):
@@ -210,21 +219,36 @@ class ArcMarginProduct(nn.Module):
         else:
             phi = torch.where((cosine - self.th) > 0, phi, cosine - self.mm)
 
-        one_hot = torch.zeros(cosine.size(), device='cuda')
+        one_hot = torch.zeros(cosine.size(), device=x.device)
+        # print(x.device, label.device, one_hot.device)
         one_hot.scatter_(1, label.view(-1, 1).long(), 1)
         output = (one_hot * phi) + ((1.0 - one_hot) * cosine)
-        output *= self.s
+        output = output * self.s
         return output
 
 
-if __name__ == "__main__":
-    # test TgramNet
-    x = torch.rand((2, 1, 160000))
-    net = TgramNet(hop_len=512)
-    net.init_weight()
-    print(net.conv_extrctor.weight)
+class Net(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+        self.bn = nn.BatchNorm2d(24)
 
-    # test MobileFaceNet
-    m = torch.rand((2, 1, 128, 313))
-    mfn_net = MelMobileFacenet(41)
-    print(mfn_net(x, m)[0].shape)
+    def forward(self, x):
+        return self.bn(x)
+
+
+if __name__ == "__main__":
+    x = torch.randn(1, 24, 24, 24)
+    net = Net()
+    net(x)
+    pass
+    # test TgramNet
+    for i in range(10000):
+        x = torch.rand((1, 1, 160000))
+        net = TgramNet(hop_len=512)
+        net.init_weight()
+        print(net.conv_extrctor.weight)
+
+        # test MobileFaceNet
+        m = torch.rand((1, 1, 128, 313))
+        mfn_net = MelMobileFacenet(41)
+        print(mfn_net(x, m)[0].shape)
