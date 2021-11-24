@@ -77,18 +77,18 @@ parser.add_argument('--arcface', default=True, type=bool, help='using arcface or
 parser.add_argument('--m', type=float, default=0.5, help='margin for arcface')
 parser.add_argument('--s', type=float, default=30, help='scale for arcface')
 parser.add_argument('--num-class', default=param['num_class'])
-parser.add_argument('--pos-margin', default=param['pos_margin'])
 parser.add_argument('--device-ids', default=param['device_ids'])
 parser.add_argument('--ID-factor', default=param['ID_factor'])
 
 
-def preprocess():
-    args = parser.parse_args()
-    root_folder = os.path.join(args.pre_data_dir, args.con_file)
-    if not os.path.exists(root_folder):
-        data_split(process_machines=args.process_machines,
-                   data_dir=args.data_dir,
-                   root_folder=root_folder)
+# def preprocess():
+#     args = parser.parse_args()
+#     root_folder = os.path.join(args.pre_data_dir, f'313frames_train_path_list.db')
+#     if not os.path.exists(root_folder):
+#         data_split(process_machines=args.process_machines,
+#                    data_dir=args.data_dir,
+#                    root_folder=root_folder,
+#                    ID_factor=args.ID_factor)
 
 
 def test(args):
@@ -184,10 +184,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     args.t = 0.01
-    ver = f'STgram_MFN(t={args.t},lr={args.con_lr})'
+    ver = f'STgram_MFN(t={args.t},lr={args.lr})'
     args.version = ver
     print(args.version)
-    preprocess()
+    # preprocess()
 
     args.arcface = True
     args.m = 1.0
@@ -199,12 +199,3 @@ if __name__ == "__main__":
     pretrain_path = ver
     main(args)
     test(args)
-
-    # =========================
-    #  cos_sim test
-    # =========================
-    # args = parser.parse_args()
-    # args.arcface = False
-    # args.version = f'Contrastive_STgram_MFN(t=0.05)'
-    # print(args.version)
-    # cs_test(args, cs=True, norm=True)
