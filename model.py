@@ -86,7 +86,7 @@ class TgramNet(nn.Module):
         self.conv_extrctor = nn.Conv1d(1, mel_bins, win_len, hop_len, win_len // 2, bias=False)
         self.conv_encoder = nn.Sequential(
             *[nn.Sequential(
-                nn.LayerNorm([mel_bins]),
+                nn.LayerNorm([mel_bins, 313]),
                 nn.LeakyReLU(0.2, inplace=True),
                 nn.Conv1d(mel_bins, mel_bins, 3, 1, 1, bias=False)
             ) for _ in range(num_layer)])
