@@ -90,7 +90,7 @@ class TgramNet(nn.Module):
                 nn.LeakyReLU(0.2, inplace=True),
                 nn.Conv1d(mel_bins, mel_bins, 3, 1, 1, bias=False)
             ) for _ in range(num_layer)])
-        self.tgramnet.init_weight()
+        self.init_weight()
 
     def forward(self, x):
         out = self.conv_extrctor(x)
@@ -250,5 +250,5 @@ if __name__ == "__main__":
 
         # test MobileFaceNet
         m = torch.rand((1, 1, 128, 313))
-        mfn_net = MelMobileFacenet(41)
+        mfn_net = MobileFaceNet(41)
         print(mfn_net(x, m)[0].shape)
