@@ -183,14 +183,13 @@ if __name__ == "__main__":
     reload_visdom(flag=False)
 
     args = parser.parse_args()
-    args.t = 0.01
-    ver = f'STgram_MFN(t={args.t},lr={args.lr})'
+    ver = f'STgram_MFN'
     args.version = ver
     print(args.version)
     # preprocess()
 
     args.arcface = True
-    args.m = 1.0
+    args.m = 0.7
     args.s = 30
     if args.arcface:
         args.version = ver + f'_ArcFace(m={args.m},s={args.s})'

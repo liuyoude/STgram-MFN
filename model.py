@@ -2,6 +2,7 @@ from torch import nn
 import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
+from einops.layers.torch import Rearrange
 
 import math
 from torch.nn import Parameter
@@ -86,7 +87,7 @@ class TgramNet(nn.Module):
         self.conv_extrctor = nn.Conv1d(1, mel_bins, win_len, hop_len, win_len // 2, bias=False)
         self.conv_encoder = nn.Sequential(
             *[nn.Sequential(
-                nn.LayerNorm([mel_bins, 313]),
+                nn.LayerNorm(313),
                 nn.LeakyReLU(0.2, inplace=True),
                 nn.Conv1d(mel_bins, mel_bins, 3, 1, 1, bias=False)
             ) for _ in range(num_layer)])
@@ -98,12 +99,13 @@ class TgramNet(nn.Module):
         return out
 
     def init_weight(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv1d):
-                nn.init.xavier_uniform_(m.weight)
-            if isinstance(m, nn.LayerNorm):
-                nn.init.constant_(m.bias, 0)
-                nn.init.constant_(m.weight, 1.0)
+        pass
+        # for m in self.modules():
+        #     if isinstance(m, nn.Conv1d):
+        #         nn.init.xavier_uniform_(m.weight)
+        #     if isinstance(m, nn.LayerNorm):
+        #         nn.init.constant_(m.bias, 0)
+        #         nn.init.constant_(m.weight, 1.0)
 
 
 class MobileFaceNet(nn.Module):
@@ -121,7 +123,7 @@ class MobileFaceNet(nn.Module):
         block = Bottleneck
         self.blocks = self._make_layer(block, bottleneck_setting)
 
-        self.conv2 = ConvBlock(128, 512, 1, 1, 0)
+        self.conv2 = ConvBlock(bottleneck_setting[-1][1], 512, 1, 1, 0)
 
         self.linear7 = ConvBlock(512, 512, (8, 20), 1, 0, dw=True, linear=True)
 
@@ -174,7 +176,7 @@ class STgramMFN(nn.Module):
                  c_dim=128,
                  win_len=1024,
                  hop_len=512,
-                 bottleneck_setting=Mobilenetv2_bottleneck_setting,
+                 bottleneck_setting=Mobilefacenet_bottleneck_setting,
                  arcface=None):
         super(STgramMFN, self).__init__()
         self.arcface = arcface

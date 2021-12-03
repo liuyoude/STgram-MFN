@@ -34,7 +34,7 @@ win_length: 1024
 power: 2.0
 
 # train
-epochs: 200
+epochs: 300
 batch_size: 128
 workers: 16
 lr: 1e-4
