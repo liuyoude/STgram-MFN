@@ -1,23 +1,16 @@
-import logging
 import os
-import sys
 import sklearn
 import numpy as np
 import time
 import re
-import joblib
 
 import torch
 import librosa
-from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-# from torch.utils.tensorboard import SummaryWriter
 from visdom import Visdom
 from tqdm import tqdm
-from data_func.view_generator import ViewGenerator
-from utils import accuracy, save_checkpoint, get_machine_id_list, create_test_file_list, log_mel_spect_to_vector, \
-    calculate_anomaly_score, file_to_wav_vector
+from utils import save_checkpoint, get_machine_id_list, create_test_file_list
+from dataset import Generator
 
 import utils
 
@@ -49,7 +42,7 @@ class wave_Mel_MFN_trainer(object):
         n_iter = 0
 
         # create model dir for saving
-        os.makedirs(os.path.join(self.args.model_dir, self.args.version, 'fine-tune'), exist_ok=True)
+        os.makedirs(os.path.join(self.args.model_dir, self.args.version), exist_ok=True)
 
         print(f"Start classifier training for {self.args.epochs} epochs.")
         print(f"Training with gpu: {self.args.disable_cuda}.")
@@ -96,7 +89,7 @@ class wave_Mel_MFN_trainer(object):
 
             if self.scheduler is not None and epoch_counter >= 20:
                 self.scheduler.step()
-            print(f"Epoch: {epoch_counter}\tLoss: {loss}")
+            print(f"Epoch: {epoch_counter}\tLoss: {loss.item()}")
             if epoch_counter % 2 == 0:
                 # save model checkpoints
                 auc, pauc = self.eval()
@@ -119,7 +112,7 @@ class wave_Mel_MFN_trainer(object):
                         'clf_state_dict': self.classifier.state_dict(),
                         'optimizer': self.optimizer.state_dict(),
                     }, is_best=False,
-                        filename=os.path.join(self.args.model_dir, self.args.version, 'fine-tune', checkpoint_name))
+                        filename=os.path.join(self.args.model_dir, self.args.version, checkpoint_name))
             else:
                 no_better += 1
             # if no_better > self.args.early_stop:
@@ -173,13 +166,13 @@ class wave_Mel_MFN_trainer(object):
 
                     x_mel = x[:self.args.sr * 10]  # (1, audio_length)
                     x_mel = torch.from_numpy(x_mel)
-                    x_mel = ViewGenerator(self.args.sr,
-                                          n_fft=self.args.n_fft,
-                                          n_mels=self.args.n_mels,
-                                          win_length=self.args.win_length,
-                                          hop_length=self.args.hop_length,
-                                          power=self.args.power,
-                                          )(x_mel).unsqueeze(0).unsqueeze(0).to(self.args.device)
+                    x_mel = Generator(self.args.sr,
+                                      n_fft=self.args.n_fft,
+                                      n_mels=self.args.n_mels,
+                                      win_length=self.args.win_length,
+                                      hop_length=self.args.hop_length,
+                                      power=self.args.power,
+                                      )(x_mel).unsqueeze(0).unsqueeze(0).to(self.args.device)
 
                     with torch.no_grad():
                         self.classifier.eval()
@@ -248,13 +241,13 @@ class wave_Mel_MFN_trainer(object):
 
                     x_mel = x[:self.args.sr * 10]  # (1, audio_length)
                     x_mel = torch.from_numpy(x_mel)
-                    x_mel = ViewGenerator(self.args.sr,
-                                          n_fft=self.args.n_fft,
-                                          n_mels=self.args.n_mels,
-                                          win_length=self.args.win_length,
-                                          hop_length=self.args.hop_length,
-                                          power=self.args.power,
-                                          )(x_mel).unsqueeze(0).unsqueeze(0).to(self.args.device)
+                    x_mel = Generator(self.args.sr,
+                                      n_fft=self.args.n_fft,
+                                      n_mels=self.args.n_mels,
+                                      win_length=self.args.win_length,
+                                      hop_length=self.args.hop_length,
+                                      power=self.args.power,
+                                      )(x_mel).unsqueeze(0).unsqueeze(0).to(self.args.device)
 
                     with torch.no_grad():
                         self.classifier.eval()
@@ -295,13 +288,13 @@ class wave_Mel_MFN_trainer(object):
 
         x_mel = x[:self.args.sr * 10]  # (1, audio_length)
         x_mel = torch.from_numpy(x_mel)
-        x_mel = ViewGenerator(self.args.sr,
-                              n_fft=self.args.n_fft,
-                              n_mels=self.args.n_mels,
-                              win_length=self.args.win_length,
-                              hop_length=self.args.hop_length,
-                              power=self.args.power,
-                              )(x_mel).unsqueeze(0).unsqueeze(0)
+        x_mel = Generator(self.args.sr,
+                          n_fft=self.args.n_fft,
+                          n_mels=self.args.n_mels,
+                          win_length=self.args.win_length,
+                          hop_length=self.args.hop_length,
+                          power=self.args.power,
+                          )(x_mel).unsqueeze(0).unsqueeze(0)
         with torch.no_grad():
             self.classifier.eval()
             wav_enco, mel = self.classifier(x_wav, x_mel)

@@ -1,8 +1,7 @@
 import os
 import shutil
 import sys
-
-import torch
+import time
 import yaml
 import csv
 import glob
@@ -11,6 +10,7 @@ import re
 import numpy as np
 import librosa
 import torch
+import joblib
 
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
@@ -24,6 +24,7 @@ def save_config_file(model_checkpoints_folder, args):
         os.makedirs(model_checkpoints_folder)
         with open(os.path.join(model_checkpoints_folder, 'config.yml'), 'w') as outfile:
             yaml.dump(args, outfile, default_flow_style=False)
+
 
 def save_csv(save_file_path,
              save_data):
@@ -56,6 +57,7 @@ def select_dirs(data_dir, data_type='dev_data'):
     dirs = glob.glob(dir_path)
     return dirs
 
+
 def replay_visdom(writer, log_path):
     file_path = os.path.abspath(f'{log_path}/*')
     files = glob.glob(file_path)
@@ -70,12 +72,13 @@ def create_file_list(target_dir,
     files = sorted(glob.glob(list_path))
     return files
 
+
 def create_wav_list(target_dir,
-                          id_name,
-                          dir_name='test',
-                          prefix_normal='normal',
-                          prefix_anomaly='anomaly',
-                          ext='wav'):
+                    id_name,
+                    dir_name='test',
+                    prefix_normal='normal',
+                    prefix_anomaly='anomaly',
+                    ext='wav'):
     normal_files_path = f'{target_dir}/{dir_name}/{prefix_normal}_{id_name}*.{ext}'
     normal_files = sorted(glob.glob(normal_files_path))
 
@@ -84,6 +87,7 @@ def create_wav_list(target_dir,
         anomaly_files = sorted(glob.glob(anomaly_files_path))
         return normal_files, anomaly_files
     return normal_files
+
 
 # get test machine id list
 def get_machine_id_list(target_dir,
@@ -95,6 +99,7 @@ def get_machine_id_list(target_dir,
         itertools.chain.from_iterable([re.findall('id_[0-9][0-9]', ext_id) for ext_id in files_path])
     )))
     return machine_id_list
+
 
 # def file_to_wav_vector(file_name,
 #                        n_fft=1024,
@@ -123,12 +128,13 @@ def file_to_wav_vector(file_name,
                        frames=5,
                        skip_frames=1):
     y, sr = librosa.load(file_name, sr=None)
-    wav_length = (frames-2-1) * hop_length + win_length
+    wav_length = (frames - 2 - 1) * hop_length + win_length
     skip_length = (skip_frames - 1) * hop_length
-    wav_vector = np.zeros(((y.shape[0]-wav_length)//skip_length, wav_length))
-    for i in range((y.shape[0]-wav_length)//skip_length):
-        wav_vector[i] = y[i*skip_length: i*skip_length+wav_length]
+    wav_vector = np.zeros(((y.shape[0] - wav_length) // skip_length, wav_length))
+    for i in range((y.shape[0] - wav_length) // skip_length):
+        wav_vector[i] = y[i * skip_length: i * skip_length + wav_length]
     return wav_vector
+
 
 # getting target dir file list and label list
 def create_test_file_list(target_dir,
@@ -149,13 +155,14 @@ def create_test_file_list(target_dir,
     labels = np.concatenate((normal_labels, anomaly_labels), axis=0)
     return files, labels
 
+
 # make log mel spectrogram for each file
 def file_to_log_mel_spectrogram(file_name,
                                 n_mels=64,
                                 n_fft=1024,
                                 hop_length=512,
                                 power=2.0,
-                                p_flag = False):
+                                p_flag=False):
     y, sr = librosa.load(file_name, sr=None)
     S = librosa.stft(y,
                      n_fft=n_fft,
@@ -171,7 +178,6 @@ def file_to_log_mel_spectrogram(file_name,
     if p_flag:
         return log_mel_spectrogram, p
     return log_mel_spectrogram
-
 
 
 # log mel spectrogram to vector
@@ -194,13 +200,13 @@ def log_mel_spect_to_vector(file_name,
                                                 hop_length=hop_length,
                                                 power=power)
     dims = n_mels * frames
-    vector_size = (log_mel_spect.shape[1] - frames)//skip_frames + 1
+    vector_size = (log_mel_spect.shape[1] - frames) // skip_frames + 1
     if vector_size < 1:
         print('Warning: frames is too large!')
         return np.empty((0, dims))
     vector = np.zeros((vector_size, frames, n_mels))
     for n in range(vector_size):
-        vector[n, :, :] = log_mel_spect[:, n*skip_frames: n*skip_frames+frames].T
+        vector[n, :, :] = log_mel_spect[:, n * skip_frames: n * skip_frames + frames].T
     # for t in range(frames):
     #     vector[:, t * n_mels: (t + 1) * n_mels] = log_mel_spect[:, t: t + vector_size].T
     # vector = vector.reshape(vector_size, -1)
@@ -211,15 +217,17 @@ def log_mel_spect_to_vector(file_name,
         return vector, id_vector
     return vector
 
+
 def calculate_gwrp(errors, decay):
     errors = sorted(errors, reverse=True)
     gwrp_w = decay ** np.arange(len(errors))
-    #gwrp_w[gwrp_w < 0.1] = 0.1
+    # gwrp_w[gwrp_w < 0.1] = 0.1
     sum_gwrp_w = np.sum(gwrp_w)
     errors = errors * gwrp_w
     errors = np.sum(errors)
     score = errors / sum_gwrp_w
     return score
+
 
 # calculate anomaly score
 def calculate_anomaly_score(data,
@@ -256,3 +264,35 @@ def cos_sim(a, b):
     cos = num / denorm
     sim = 0.5 + 0.5 * cos
     return sim
+
+
+def path_to_dict(process_machines,
+                 data_dir,
+                 root_folder,
+                 ID_factor,
+                 dir_name='train',
+                 data_type='', ):
+    dirs = select_dirs(data_dir, data_type=data_type)
+    path_list_dict = {}
+    for index, target_dir in enumerate(sorted(dirs)):
+        print('\n' + '=' * 20)
+        print(f'[{index + 1}/{len(dirs)}] {target_dir}')
+        time.sleep(1)
+        machine_type = os.path.split(target_dir)[1]
+        if machine_type not in process_machines:
+            continue
+
+        machine_id_list = get_machine_id_list(target_dir, dir_name=dir_name)
+        for id_str in machine_id_list:
+            files, _ = create_test_file_list(target_dir, id_str, dir_name=dir_name)
+            if machine_type == 'ToyCar' or machine_type == 'ToyConveyor':
+                id = int(id_str[-1]) - 1
+            else:
+                id = int(id_str[-1])
+
+            path_list_dict[ID_factor[machine_type] * 7 + id] = files
+
+            print(f'{data_type} {machine_type} {id_str} were split to {len(files)} wav files!')
+    # path_list = list(chain.from_iterable(path_list))
+    with open(root_folder, 'wb') as f:
+        joblib.dump(path_list_dict, f)
