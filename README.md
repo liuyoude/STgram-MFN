@@ -5,8 +5,9 @@ paper link: https://arxiv.org/pdf/2201.05510.pdf
 ---
 
 ```shell
-$ conda env create --name asd_stgram_mfn --file env.yml
-$ conda activate asd_stgram_mfn
+$ conda create -n stgram_mfn python=3.7
+$ conda activate stgram_mfn
+$ pip install -r requirements.txt
 $ python run.py
 ```
 

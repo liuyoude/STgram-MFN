@@ -109,7 +109,7 @@ class wave_Mel_MFN_trainer(object):
                     checkpoint_name = 'checkpoint_best.pth.tar'
                     save_checkpoint({
                         'epoch': epoch_counter,
-                        'clf_state_dict': self.classifier.state_dict(),
+                        'clf_state_dict': self.classifier.module.state_dict() if self.args.dp else self.classifier.state_dict(),
                         'optimizer': self.optimizer.state_dict(),
                     }, is_best=False,
                         filename=os.path.join(self.args.model_dir, self.args.version, checkpoint_name))
@@ -151,32 +151,11 @@ class wave_Mel_MFN_trainer(object):
                 # y_pred_recon = [0. for _ in test_files]
                 # print(111, len(test_files), target_dir)
                 for file_idx, file_path in enumerate(test_files):
-                    id_str = re.findall('id_[0-9][0-9]', file_path)
-                    if machine_type == 'ToyCar' or machine_type == 'ToyConveyor':
-                        id = int(id_str[0][-1]) - 1
-                    else:
-                        id = int(id_str[0][-1])
-                    label = int(self.id_factor[machine_type] * 7 + id)
-                    labels = torch.from_numpy(np.array(label)).long().to(self.args.device)
-                    (x, _) = librosa.core.load(file_path, sr=self.args.sr, mono=True)
-
-                    x_wav = x[None, None, :self.args.sr * 10]  # (1, audio_length)
-                    x_wav = torch.from_numpy(x_wav)
-                    x_wav = x_wav.float().to(self.args.device)
-
-                    x_mel = x[:self.args.sr * 10]  # (1, audio_length)
-                    x_mel = torch.from_numpy(x_mel)
-                    x_mel = Generator(self.args.sr,
-                                      n_fft=self.args.n_fft,
-                                      n_mels=self.args.n_mels,
-                                      win_length=self.args.win_length,
-                                      hop_length=self.args.hop_length,
-                                      power=self.args.power,
-                                      )(x_mel).unsqueeze(0).unsqueeze(0).to(self.args.device)
-
+                    x_wav, x_mel, label = self.transform(file_path, machine_type)
                     with torch.no_grad():
                         self.classifier.eval()
-                        predict_ids, _ = self.classifier.module(x_wav, x_mel, labels)
+                        net = self.classifier.module if self.args.dp else self.classifier
+                        predict_ids, feature = net(x_wav, x_mel, labels)
                     probs = - torch.log_softmax(predict_ids, dim=1).mean(dim=0).squeeze().cpu().numpy()
                     y_pred[file_idx] = probs[label]
 
@@ -227,31 +206,11 @@ class wave_Mel_MFN_trainer(object):
                 anomaly_score_list = []
                 y_pred = [0. for _ in test_files]
                 for file_idx, file_path in enumerate(test_files):
-                    if machine_type == 'ToyCar' or machine_type == 'ToyConveyor':
-                        id = int(id_str[-1]) - 1
-                    else:
-                        id = int(id_str[-1])
-                    label = int(self.id_factor[machine_type] * 7 + id)
-                    labels = torch.from_numpy(np.array(label)).long().to(self.args.device)
-                    (x, _) = librosa.core.load(file_path, sr=self.args.sr, mono=True)
-
-                    x_wav = x[None, None, :self.args.sr * 10]  # (1, audio_length)
-                    x_wav = torch.from_numpy(x_wav)
-                    x_wav = x_wav.float().to(self.args.device)
-
-                    x_mel = x[:self.args.sr * 10]  # (1, audio_length)
-                    x_mel = torch.from_numpy(x_mel)
-                    x_mel = Generator(self.args.sr,
-                                      n_fft=self.args.n_fft,
-                                      n_mels=self.args.n_mels,
-                                      win_length=self.args.win_length,
-                                      hop_length=self.args.hop_length,
-                                      power=self.args.power,
-                                      )(x_mel).unsqueeze(0).unsqueeze(0).to(self.args.device)
-
+                    x_wav, x_mel, label = self.transform(file_path, machine_type)
                     with torch.no_grad():
                         self.classifier.eval()
-                        predict_ids, feature = self.classifier.module(x_wav, x_mel, labels)
+                        net = self.classifier.module if self.args.dp else self.classifier
+                        predict_ids, feature = net(x_wav, x_mel, labels)
                     probs = - torch.log_softmax(predict_ids, dim=1).mean(dim=0).squeeze().cpu().numpy()
                     y_pred[file_idx] = probs[label]
                     anomaly_score_list.append([os.path.basename(file_path), y_pred[file_idx]])
@@ -280,11 +239,18 @@ class wave_Mel_MFN_trainer(object):
             utils.save_csv(result_path, self.csv_lines)
         return recore_dict
 
-    def TFE_visual(self, wav_path):
-        (x, _) = librosa.core.load(wav_path, sr=self.args.sr, mono=True)
+    def transform(self, file_path, machine_type):
+        if machine_type == 'ToyCar' or machine_type == 'ToyConveyor':
+            id = int(id_str[-1]) - 1
+        else:
+            id = int(id_str[-1])
+        label = int(self.id_factor[machine_type] * 7 + id)
+        label = torch.from_numpy(np.array(label)).long().to(self.args.device)
+        (x, _) = librosa.core.load(file_path, sr=self.args.sr, mono=True)
+
         x_wav = x[None, None, :self.args.sr * 10]  # (1, audio_length)
         x_wav = torch.from_numpy(x_wav)
-        x_wav = x_wav.float()
+        x_wav = x_wav.float().to(self.args.device)
 
         x_mel = x[:self.args.sr * 10]  # (1, audio_length)
         x_mel = torch.from_numpy(x_mel)
@@ -294,20 +260,5 @@ class wave_Mel_MFN_trainer(object):
                           win_length=self.args.win_length,
                           hop_length=self.args.hop_length,
                           power=self.args.power,
-                          )(x_mel).unsqueeze(0).unsqueeze(0)
-        with torch.no_grad():
-            self.classifier.eval()
-            wav_enco, mel = self.classifier(x_wav, x_mel)
-        wav_enco = wav_enco.cpu().squeeze().flip(dims=(0,)).numpy()
-        mel = mel.cpu().squeeze().flip(dims=(0,)).numpy()
-        print(mel.shape)
-        cmap = ['magma', 'inferno', 'plasma', 'hot']
-        index = 1
-        plt.imshow(mel, cmap=cmap[index])
-        plt.axis('off')
-        plt.show()
-        plt.close()
-        plt.imshow(wav_enco, cmap=cmap[index])
-        plt.axis('off')
-        plt.show()
-        plt.close()
+                          )(x_mel).unsqueeze(0).unsqueeze(0).to(self.args.device)
+        return x_wav, x_mel, label

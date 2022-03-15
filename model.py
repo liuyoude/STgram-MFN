@@ -1,3 +1,6 @@
+"""
+modification made on the basis of link:https://github.com/Xiaoccer/MobileFaceNet_Pytorch
+"""
 from torch import nn
 import torch
 import torch.nn.functional as F
@@ -101,9 +104,6 @@ class MobileFaceNet(nn.Module):
         self.fc_out = nn.Linear(128, num_class)
         self.arcface = arcface
         # init
-        self.init_weight()
-
-    def init_weight(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels

@@ -4,11 +4,6 @@ result_dir: ./result
 result_file: result.csv
 data_dir: ../../data/dataset
 pre_data_dir: ../../data/pre_data
-
-data_type:
-domain: source
-split_flag: False
-thread_num: 20
 process_machines:
   - pump
   - slider
@@ -35,15 +30,13 @@ epochs: 300
 batch_size: 128
 workers: 16
 lr: 1e-4
-wd: 1e-6
 cuda: True
 device_ids:
   - 0
+  - 1
 save_every_n_epochs: 50
 early_stop: 10
 
-
-t: 0.05
 num_class: 41
 
 
