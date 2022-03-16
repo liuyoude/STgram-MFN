@@ -45,7 +45,6 @@ class wave_Mel_MFN_trainer(object):
         os.makedirs(os.path.join(self.args.model_dir, self.args.version), exist_ok=True)
 
         print(f"Start classifier training for {self.args.epochs} epochs.")
-        print(f"Training with gpu: {self.args.disable_cuda}.")
 
         best_auc = 0
         a = 0
@@ -151,11 +150,11 @@ class wave_Mel_MFN_trainer(object):
                 # y_pred_recon = [0. for _ in test_files]
                 # print(111, len(test_files), target_dir)
                 for file_idx, file_path in enumerate(test_files):
-                    x_wav, x_mel, label = self.transform(file_path, machine_type)
+                    x_wav, x_mel, label = self.transform(file_path, machine_type, id_str)
                     with torch.no_grad():
                         self.classifier.eval()
                         net = self.classifier.module if self.args.dp else self.classifier
-                        predict_ids, feature = net(x_wav, x_mel, labels)
+                        predict_ids, feature = net(x_wav, x_mel, label)
                     probs = - torch.log_softmax(predict_ids, dim=1).mean(dim=0).squeeze().cpu().numpy()
                     y_pred[file_idx] = probs[label]
 
@@ -206,11 +205,11 @@ class wave_Mel_MFN_trainer(object):
                 anomaly_score_list = []
                 y_pred = [0. for _ in test_files]
                 for file_idx, file_path in enumerate(test_files):
-                    x_wav, x_mel, label = self.transform(file_path, machine_type)
+                    x_wav, x_mel, label = self.transform(file_path, machine_type, id_str)
                     with torch.no_grad():
                         self.classifier.eval()
                         net = self.classifier.module if self.args.dp else self.classifier
-                        predict_ids, feature = net(x_wav, x_mel, labels)
+                        predict_ids, feature = net(x_wav, x_mel, label)
                     probs = - torch.log_softmax(predict_ids, dim=1).mean(dim=0).squeeze().cpu().numpy()
                     y_pred[file_idx] = probs[label]
                     anomaly_score_list.append([os.path.basename(file_path), y_pred[file_idx]])
@@ -239,7 +238,7 @@ class wave_Mel_MFN_trainer(object):
             utils.save_csv(result_path, self.csv_lines)
         return recore_dict
 
-    def transform(self, file_path, machine_type):
+    def transform(self, file_path, machine_type, id_str):
         if machine_type == 'ToyCar' or machine_type == 'ToyConveyor':
             id = int(id_str[-1]) - 1
         else:

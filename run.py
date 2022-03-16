@@ -80,7 +80,7 @@ def test(args):
         args.device = torch.device('cpu')
         args.gpu_index = -1
 
-    with torch.cuda.device(args.gpu_index):
+    with torch.cuda.device(args.device_ids[0]):
         model_path = os.path.join(args.model_dir, args.version, f'checkpoint_best.pth.tar')
         model.load_state_dict(torch.load(model_path)['clf_state_dict'])
         args.dp = False
@@ -130,7 +130,7 @@ def train(args):
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=len(train_clf_loader), eta_min=0,
                                                            last_epoch=-1)
     #
-    with torch.cuda.device(args.gpu_index):
+    with torch.cuda.device(args.device_ids[0]):
         args.dp = False
         if len(args.device_ids) > 1:
             args.dp = True
