@@ -11,6 +11,7 @@ import numpy as np
 import librosa
 import torch
 import joblib
+from itertools import chain
 
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
@@ -273,7 +274,7 @@ def path_to_dict(process_machines,
                  dir_name='train',
                  data_type='', ):
     dirs = select_dirs(data_dir, data_type=data_type)
-    path_list_dict = {}
+    path_list = []
     for index, target_dir in enumerate(sorted(dirs)):
         print('\n' + '=' * 20)
         print(f'[{index + 1}/{len(dirs)}] {target_dir}')
@@ -285,14 +286,10 @@ def path_to_dict(process_machines,
         machine_id_list = get_machine_id_list(target_dir, dir_name=dir_name)
         for id_str in machine_id_list:
             files, _ = create_test_file_list(target_dir, id_str, dir_name=dir_name)
-            if machine_type == 'ToyCar' or machine_type == 'ToyConveyor':
-                id = int(id_str[-1]) - 1
-            else:
-                id = int(id_str[-1])
-
-            path_list_dict[ID_factor[machine_type] * 7 + id] = files
+            path_list.append(files)
 
             print(f'{data_type} {machine_type} {id_str} were split to {len(files)} wav files!')
-    # path_list = list(chain.from_iterable(path_list))
+    path_list = list(chain.from_iterable(path_list))
+    os.makedirs(os.path.split(root_folder)[0])
     with open(root_folder, 'wb') as f:
-        joblib.dump(path_list_dict, f)
+        joblib.dump(path_list, f)
