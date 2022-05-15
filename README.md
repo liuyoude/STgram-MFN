@@ -39,7 +39,7 @@ data
 │       ├── test
 │       └── train
 ├── pre_data
-│   └── 313frames_train_path_list.db
+    └── 313frames_train_path_list.db
 ```
 
 ### Result
