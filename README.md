@@ -1,5 +1,5 @@
 # pytorch implementation for "Anomalous Sound Detection Using Spectral-Temporal Information Fusion"
-paper link: https://arxiv.org/pdf/2201.05510.pdf, it had been accepted by ICASSP 2022.
+https://ieeexplore.ieee.org/document/9747868.
 ### Installation
 
 ---
@@ -52,3 +52,17 @@ data
  | ToyCar       | 94.44  | 87.68   | 83.07   |
  | ToyConveyor  | 74.57  | 63.60   | 64.16   |
  | Average      | 92.36  | 86.34   | 84.86   |
+ 
+ ### Cite
+ If you think this work is useful to you, please cite:
+ ```text
+@INPROCEEDINGS{9747868,
+  author={Liu, Youde and Guan, Jian and Zhu, Qiaoxi and Wang, Wenwu},
+  booktitle={ICASSP 2022 - 2022 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)}, 
+  title={Anomalous Sound Detection Using Spectral-Temporal Information Fusion}, 
+  year={2022},
+  volume={},
+  number={},
+  pages={816-820},
+  doi={10.1109/ICASSP43922.2022.9747868}}
+```
