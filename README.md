@@ -8,6 +8,7 @@ https://ieeexplore.ieee.org/document/9747868.
 $ conda create -n stgram_mfn python=3.7
 $ conda activate stgram_mfn
 $ pip install -r requirements.txt
+$ python -m visdom.server
 $ python run.py
 ```
 
