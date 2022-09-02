@@ -1,5 +1,6 @@
-# pytorch implementation for "Anomalous Sound Detection Using Spectral-Temporal Information Fusion"
-https://ieeexplore.ieee.org/document/9747868.
+### pytorch implementation for "Anomalous Sound Detection Using Spectral-Temporal Information Fusion"
+You can find paper in this link: https://ieeexplore.ieee.org/document/9747868.
+![structure](./structure.png)
 ### Installation
 
 ---
@@ -42,7 +43,7 @@ data
 │   └── valve
 │       ├── test
 │       └── train
-├── pre_data
+└── pre_data
     └── 313frames_train_path_list.db  # Automatically generated file
 ```
 
