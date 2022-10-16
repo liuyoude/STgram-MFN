@@ -47,6 +47,9 @@ data
     └── 313frames_train_path_list.db  # Automatically generated file
 ```
 
+### Model Weights File
+Our trained model weights file for loading can be get in https://zenodo.org/record/7194640#.Y0t1WXZBxD8
+
 ### Result
  | Machine Type | AUC(%) | pAUC(%) | mAUC(%) |
  | --------     | :-----:| :----:  | :----:  |
