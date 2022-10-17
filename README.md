@@ -1,5 +1,6 @@
 ## pytorch implementation for "Anomalous Sound Detection Using Spectral-Temporal Information Fusion"
-You can find paper in this link: https://ieeexplore.ieee.org/document/9747868.
+The paper in [[pdf]](https://ieeexplore.ieee.org/document/9747868).
+
 ![structure](./structure.png)
 ### Installation
 
