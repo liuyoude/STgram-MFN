@@ -51,8 +51,8 @@ data
 ### Model Weights File
 Our trained model weights file for loading can be get in https://zenodo.org/record/7194640#.Y0t1WXZBxD8
 
-### Result
- | Machine Type | AUC(%) | pAUC(%) | mAUC(%) |
+### Result on development dataset
+hine Type | AUC(%) | pAUC(%) | mAUC(%) |
  | --------     | :-----:| :----:  | :----:  |
  | Fan          | 94.04  | 88.97   | 81.39   |
  | Pump         | 91.94  | 81.75   | 83.48   |
