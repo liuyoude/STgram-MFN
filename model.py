@@ -174,7 +174,7 @@ class STgramMFN(nn.Module):
     def get_tgram(self, x_wav):
         return self.tgramnet(x_wav)
 
-    def forward(self, x_wav, x_mel, label):
+    def forward(self, x_wav, x_mel, label=None):
         x_wav = self.tgramnet(x_wav).unsqueeze(1)
         x = torch.cat((x_mel, x_wav), dim=1)
         out, feature = self.mobilefacenet(x, label)
@@ -182,13 +182,14 @@ class STgramMFN(nn.Module):
 
 
 class ArcMarginProduct(nn.Module):
-    def __init__(self, in_features=128, out_features=200, s=32.0, m=0.50, easy_margin=False):
+    def __init__(self, in_features=128, out_features=200, s=32.0, m=0.50, sub=1, easy_margin=False):
         super(ArcMarginProduct, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.s = s
         self.m = m
-        self.weight = Parameter(torch.Tensor(out_features, in_features))
+        self.sub = sub
+        self.weight = Parameter(torch.Tensor(out_features * sub, in_features))
         nn.init.xavier_uniform_(self.weight)
         # init.kaiming_uniform_()
         # self.weight.data.normal_(std=0.001)
@@ -202,6 +203,9 @@ class ArcMarginProduct(nn.Module):
 
     def forward(self, x, label):
         cosine = F.linear(F.normalize(x), F.normalize(self.weight))
+        if self.sub > 1:
+            cosine = cosine.view(-1, self.out_features, self.sub)
+            cosine, _ = torch.max(cosine, dim=2)
         sine = torch.sqrt(1.0 - torch.pow(cosine, 2))
         phi = cosine * self.cos_m - sine * self.sin_m
         if self.easy_margin:
