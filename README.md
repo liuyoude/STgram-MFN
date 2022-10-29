@@ -1,5 +1,6 @@
 ## pytorch implementation for "Anomalous Sound Detection Using Spectral-Temporal Information Fusion"
-You can find paper in this link: https://ieeexplore.ieee.org/document/9747868.
+The paper is available in [[pdf]](https://ieeexplore.ieee.org/document/9747868).
+
 ![structure](./structure.png)
 ### Installation
 
@@ -47,8 +48,11 @@ data
     └── 313frames_train_path_list.db  # Automatically generated file
 ```
 
-### Result
- | Machine Type | AUC(%) | pAUC(%) | mAUC(%) |
+### Model Weights File
+Our trained model weights file for loading can be get in https://zenodo.org/record/7194640#.Y0t1WXZBxD8
+
+### Result on development dataset
+hine Type | AUC(%) | pAUC(%) | mAUC(%) |
  | --------     | :-----:| :----:  | :----:  |
  | Fan          | 94.04  | 88.97   | 81.39   |
  | Pump         | 91.94  | 81.75   | 83.48   |
