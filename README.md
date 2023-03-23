@@ -13,7 +13,7 @@ $ pip install -r requirements.txt
 $ python run.py
 ```
 
-### dataset
+### Dataset
 ---
 [DCASE2020 Task2](https://dcase.community/challenge2020/task-unsupervised-detection-of-anomalous-sounds) Dataset: 
 + [development dataset](https://zenodo.org/record/3678171)
