@@ -6,6 +6,7 @@ import torch
 import torch.nn.functional as F
 import math
 from torch.nn import Parameter
+import torchaudio
 
 
 class Bottleneck(nn.Module):
@@ -83,8 +84,7 @@ Mobilenetv2_bottleneck_setting = [
 class MobileFaceNet(nn.Module):
     def __init__(self,
                  num_class,
-                 bottleneck_setting=Mobilefacenet_bottleneck_setting,
-                 arcface=None):
+                 bottleneck_setting=Mobilefacenet_bottleneck_setting):
         super(MobileFaceNet, self).__init__()
 
         self.conv1 = ConvBlock(2, 64, 3, 2, 1)
@@ -96,13 +96,12 @@ class MobileFaceNet(nn.Module):
         self.blocks = self._make_layer(block, bottleneck_setting)
 
         self.conv2 = ConvBlock(bottleneck_setting[-1][1], 512, 1, 1, 0)
-
+        # 20(10), 4(2), 8(4)
         self.linear7 = ConvBlock(512, 512, (8, 20), 1, 0, dw=True, linear=True)
-
+        # self.linear7 = ConvBlock(512, 512, (4, 10), 1, 0, dw=True, linear=True)
         self.linear1 = ConvBlock(512, 128, 1, 1, 0, linear=True)
 
         self.fc_out = nn.Linear(128, num_class)
-        self.arcface = arcface
         # init
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -132,10 +131,7 @@ class MobileFaceNet(nn.Module):
         x = self.linear7(x)
         x = self.linear1(x)
         feature = x.view(x.size(0), -1)
-        if self.arcface is not None:
-            out = self.arcface(feature, label)
-        else:
-            out = self.fc_out(feature)
+        out = self.fc_out(feature)
         return out, feature
 
 
@@ -146,10 +142,11 @@ class TgramNet(nn.Module):
         self.conv_extrctor = nn.Conv1d(1, mel_bins, win_len, hop_len, win_len // 2, bias=False)
         self.conv_encoder = nn.Sequential(
             *[nn.Sequential(
+                # 313(10) , 63(2), 126(4)
                 nn.LayerNorm(313),
                 nn.LeakyReLU(0.2, inplace=True),
-                nn.Conv1d(mel_bins, mel_bins, 3, 1, 1, bias=False)
-            ) for _ in range(num_layer)])
+                nn.Conv1d(mel_bins, mel_bins, 3, 1, 1, bias=False),
+            ) for idx in range(num_layer)])
 
     def forward(self, x):
         out = self.conv_extrctor(x)
@@ -158,26 +155,29 @@ class TgramNet(nn.Module):
 
 
 class STgramMFN(nn.Module):
-    def __init__(self, num_class,
+    def __init__(self, num_classes,
                  c_dim=128,
                  win_len=1024,
                  hop_len=512,
                  bottleneck_setting=Mobilefacenet_bottleneck_setting,
-                 arcface=None):
+                 use_arcface=False, m=0.5, s=30, sub=1):
         super(STgramMFN, self).__init__()
-        self.arcface = arcface
+        self.arcface = ArcMarginProduct(in_features=128, out_features=num_classes,
+                                        m=m, s=s, sub=sub) if use_arcface else use_arcface
         self.tgramnet = TgramNet(mel_bins=c_dim, win_len=win_len, hop_len=hop_len)
-        self.mobilefacenet = MobileFaceNet(num_class=num_class,
-                                           bottleneck_setting=bottleneck_setting,
-                                           arcface=arcface)
+        self.mobilefacenet = MobileFaceNet(num_class=num_classes,
+                                           bottleneck_setting=bottleneck_setting)
 
     def get_tgram(self, x_wav):
         return self.tgramnet(x_wav)
 
     def forward(self, x_wav, x_mel, label=None):
-        x_wav = self.tgramnet(x_wav).unsqueeze(1)
-        x = torch.cat((x_mel, x_wav), dim=1)
+        x_wav, x_mel = x_wav.unsqueeze(1), x_mel.unsqueeze(1)
+        x_t = self.tgramnet(x_wav).unsqueeze(1)
+        x = torch.cat((x_mel, x_t), dim=1)
         out, feature = self.mobilefacenet(x, label)
+        if self.arcface:
+            out = self.arcface(feature, label)
         return out, feature
 
 
@@ -219,3 +219,9 @@ class ArcMarginProduct(nn.Module):
         output = (one_hot * phi) + ((1.0 - one_hot) * cosine)
         output = output * self.s
         return output
+
+
+if __name__ == '__main__':
+    net = STgramMFN(num_classes=10)
+    x_wav = torch.randn((2, 16000*2))
+

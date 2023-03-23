@@ -2,51 +2,26 @@
 The paper is available in [[pdf]](https://ieeexplore.ieee.org/document/9747868).
 
 ![structure](./structure.png)
+
 ### Installation
 
 ---
-
+`sh run.sh` or
 ```shell
 $ conda create -n stgram_mfn python=3.7
 $ conda activate stgram_mfn
 $ pip install -r requirements.txt
-$ python -m visdom.server
 $ python run.py
 ```
 
 ### dataset
-We manually mixed the development and additional training dataset of DCASE 2020 Task2
-+ development dataset: https://zenodo.org/record/3678171
-+ additional training dataset: https://zenodo.org/record/3727685
+[DCASE2020 Task2](https://dcase.community/challenge2020/task-unsupervised-detection-of-anomalous-sounds) Dataset: 
++ [development dataset](https://zenodo.org/record/3678171)
++ [additional training dataset](https://zenodo.org/record/3727685)
++ [Evaluation dataset](https://zenodo.org/record/3841772)
 
-If you want test the result in evaluation dataset (https://zenodo.org/record/3841772#.YoCDkOhBxaQ), you can use official evaluator: https://github.com/y-kawagu/dcase2020_task2_evaluator
+data path can be set in config.yaml
 
-
-data directory tree:
-```text
-data
-├── dataset
-│   ├── fan
-│   │   ├── test
-│   │   └── train
-│   ├── pump
-│   │   ├── test
-│   │   └── train
-│   ├── slider
-│   │   ├── test
-│   │   └── train
-│   ├── ToyCar
-│   │   ├── test
-│   │   └── train
-│   ├── ToyConveyor
-│   │   ├── test
-│   │   └── train
-│   └── valve
-│       ├── test
-│       └── train
-└── pre_data
-    └── 313frames_train_path_list.db  # Automatically generated file
-```
 
 ### Model Weights File
 Our trained model weights file for loading can be get in https://zenodo.org/record/7194640#.Y0t1WXZBxD8

@@ -1,5 +1,6 @@
 .idea
 data
-result
+results
+runs
 model_param
 log

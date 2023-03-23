@@ -1,217 +1,137 @@
 import os
-import sklearn
-import numpy as np
-import time
-import re
-
 import torch
-import librosa
-import matplotlib.pyplot as plt
-from visdom import Visdom
+import torch.nn as nn
 from tqdm import tqdm
-from utils import save_checkpoint, get_machine_id_list, create_test_file_list
-from dataset import Generator
+import numpy as np
+import torch.nn.functional as F
+import sklearn
 
+from sklearn.mixture import GaussianMixture
+from loss import ASDLoss
 import utils
 
 
-# torch.manual_seed(666)
-
-
-class wave_Mel_MFN_trainer(object):
-
+class Trainer:
     def __init__(self, *args, **kwargs):
         self.args = kwargs['args']
-        self.data_dir = kwargs['data_dir']
-        self.id_factor = kwargs['id_fctor']
-        self.machine_type = os.path.split(self.data_dir)[1]
-        self.classifier = kwargs['classifier'].to(self.args.device)
+        self.net = kwargs['net']
         self.optimizer = kwargs['optimizer']
         self.scheduler = kwargs['scheduler']
-        visdom_folder = f'./log/'
-        os.makedirs(visdom_folder, exist_ok=True)
-        visdom_path = os.path.join(visdom_folder, f'{self.args.version}_visdom_ft.log')
-        self.writer = Visdom(env=self.args.version, log_to_filename=visdom_path)
-        self.criterion = torch.nn.CrossEntropyLoss().to(self.args.device)
-        self.recon_criterion = torch.nn.L1Loss().to(self.args.device)
-
-        self.csv_lines = []
-
+        self.writer = self.args.writer
+        self.logger = self.args.logger
+        self.criterion = ASDLoss().to(self.args.device)
+        self.transform = kwargs['transform']
     def train(self, train_loader):
-        # self.eval()
-        n_iter = 0
-
-        # create model dir for saving
-        os.makedirs(os.path.join(self.args.model_dir, self.args.version), exist_ok=True)
-
-        print(f"Start classifier training for {self.args.epochs} epochs.")
-
-        best_auc = 0
-        a = 0
-        p = 0
-        e = 0
-        no_better = 0
-        for epoch_counter in range(self.args.epochs):
-            pbar = tqdm(train_loader, total=len(train_loader), ncols=100)
-            for waveform, melspec, labels in pbar:
-                waveform = waveform.float().unsqueeze(1).to(self.args.device)
-                melspec = melspec.float().to(self.args.device)
-                labels = labels.long().squeeze().to(self.args.device)
-                self.classifier.train()
-                predict_ids, _ = self.classifier(waveform, melspec, labels)
-                loss = self.criterion(predict_ids, labels)
-                pbar.set_description(f'Epoch:{epoch_counter}'
-                                     f'\tLclf:{loss.item():.5f}\t')
-
+        # self.test(save=False)
+        model_dir = os.path.join(self.writer.log_dir, 'model')
+        os.makedirs(model_dir, exist_ok=True)
+        epochs = self.args.epochs
+        valid_every_epochs = self.args.valid_every_epochs
+        early_stop_epochs = self.args.early_stop_epochs
+        start_valid_epoch = self.args.start_valid_epoch
+        num_steps = len(train_loader)
+        self.sum_train_steps = 0
+        self.sum_valid_steps = 0
+        best_metric = 0
+        no_better_epoch = 0
+        for epoch in range(0, epochs + 1):
+            # train
+            sum_loss = 0
+            self.net.train()
+            train_bar = tqdm(train_loader, total=num_steps, desc=f'Epoch-{epoch}')
+            for (x_wavs, x_mels, labels) in train_bar:
+                # forward
+                x_wavs, x_mels = x_wavs.float().to(self.args.device), x_mels.float().to(self.args.device)
+                labels = labels.reshape(-1).long().to(self.args.device)
+                # print(x_wavs.shape, x_mels.shape, labels.shape)
+                logits, _ = self.net(x_wavs, x_mels, labels)
+                loss = self.criterion(logits, labels)
+                train_bar.set_postfix(loss=f'{loss.item():.5f}')
+                # backward
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
-
-                if n_iter % self.args.log_every_n_steps == 0:
-                    self.writer.line([loss.item()], [n_iter],
-                                     win='Classifier Loss',
-                                     update='append',
-                                     opts=dict(
-                                         title='Classifier Loss',
-                                         legend=['loss']
-                                     ))
-                    if self.scheduler is not None:
-                        self.writer.line([self.scheduler.get_last_lr()[0]], [n_iter],
-                                         win='Classifier LR',
-                                         update='append',
-                                         opts=dict(
-                                             title='AE Learning Rate',
-                                             legend=['lr']
-                                         ))
-
-                n_iter += 1
-
-            if self.scheduler is not None and epoch_counter >= 20:
+                # visualization
+                self.writer.add_scalar(f'train_loss', loss.item(), self.sum_train_steps)
+                sum_loss += loss.item()
+                self.sum_train_steps += 1
+            avg_loss = sum_loss / num_steps
+            if self.scheduler is not None and epoch >= self.args.start_scheduler_epoch:
                 self.scheduler.step()
-            print(f"Epoch: {epoch_counter}\tLoss: {loss.item()}")
-            if epoch_counter % 2 == 0:
-                # save model checkpoints
-                auc, pauc = self.eval()
-                self.writer.line([[auc, pauc]], [epoch_counter], win=self.machine_type,
-                                 update='append',
-                                 opts=dict(
-                                     title=self.machine_type,
-                                     legend=['AUC_clf', 'pAUC_clf']
-                                 ))
-                print(f'{self.machine_type}\t[{epoch_counter}/{self.args.epochs}]\tAUC: {auc:3.3f}\tpAUC: {pauc:3.3f}')
-                if (auc + pauc) > best_auc:
-                    no_better = 0
-                    best_auc = pauc + auc
-                    p = pauc
-                    a = auc
-                    e = epoch_counter
-                    checkpoint_name = 'checkpoint_best.pth.tar'
-                    save_checkpoint({
-                        'epoch': epoch_counter,
-                        'clf_state_dict': self.classifier.module.state_dict() if self.args.dp else self.classifier.state_dict(),
-                        'optimizer': self.optimizer.state_dict(),
-                    }, is_best=False,
-                        filename=os.path.join(self.args.model_dir, self.args.version, checkpoint_name))
-            else:
-                no_better += 1
-            # if no_better > self.args.early_stop:
-            #     break
+            self.logger.info(f'Epoch-{epoch}\tloss:{avg_loss:.5f}')
+            # valid
+            if (epoch - start_valid_epoch) % valid_every_epochs == 0 and epoch >= start_valid_epoch:
+                avg_auc, avg_pauc = self.test(save=False, gmm_n=False)
+                self.writer.add_scalar(f'auc', avg_auc, epoch)
+                self.writer.add_scalar(f'pauc', avg_pauc, epoch)
+                if avg_auc + avg_pauc >= best_metric:
+                    no_better_epoch = 0
+                    best_metric = avg_auc + avg_pauc
+                    best_model_path = os.path.join(model_dir, 'best_checkpoint.pth.tar')
+                    utils.save_model_state_dict(best_model_path, epoch=epoch,
+                                                net=self.net.module if self.args.dp else self.net,
+                                                optimizer=None)
+                    self.logger.info(f'Best epoch now is: {epoch:4d}')
+                else:
+                    # early stop
+                    no_better_epoch += 1
+                    if no_better_epoch > early_stop_epochs > 0: break
+            # save last 10 epoch state dict
+            if epoch >= self.args.start_save_model_epochs:
+                if (epoch - self.args.start_save_model_epochs) % self.args.save_model_interval_epochs == 0:
+                    model_path = os.path.join(model_dir, f'{epoch}_checkpoint.pth.tar')
+                    utils.save_model_state_dict(model_path, epoch=epoch,
+                                                net=self.net.module if self.args.dp else self.net,
+                                                optimizer=None)
 
-            # if epoch_counter % 10 == 0:
-            #     checkpoint_name = 'checkpoint_{:04d}.pth.tar'.format(epoch_counter)
-            #     save_checkpoint({
-            #         'epoch': epoch_counter,
-            #         'clf_state_dict': self.classifier.state_dict(),
-            #         'optimizer': self.optimizer.state_dict(),
-            #     }, is_best=False,
-            #         filename=os.path.join(self.args.model_dir, self.args.version, 'fine-tune', checkpoint_name))
-
-        print(f'Traing {self.machine_type} completed!\tBest Epoch: {e:4d}\tBest AUC: {a:3.3f}\tpAUC: {p:3.3f}')
-
-    def eval(self):
-        sum_auc, sum_pauc, num, total_time = 0, 0, 0, 0
-        #
-        # sum_auc_r, sum_pauc_r = 0, 0
-        dirs = utils.select_dirs(self.data_dir, data_type='')
-        print('\n' + '=' * 20)
-        for index, target_dir in enumerate(sorted(dirs)):
-            start = time.perf_counter()
-            machine_type = os.path.split(target_dir)[1]
-            if machine_type not in self.args.process_machines:
-                continue
-            num += 1
-            # get machine list
-            machine_id_list = get_machine_id_list(target_dir, dir_name='test')
-            performance = []
-            performance_recon = []
-            for id_str in machine_id_list:
-                test_files, y_true = create_test_file_list(target_dir, id_str, dir_name='test')
-                y_pred = [0. for _ in test_files]
-                # y_pred_recon = [0. for _ in test_files]
-                # print(111, len(test_files), target_dir)
-                for file_idx, file_path in enumerate(test_files):
-                    x_wav, x_mel, label = self.transform(file_path, machine_type, id_str)
-                    with torch.no_grad():
-                        self.classifier.eval()
-                        net = self.classifier.module if self.args.dp else self.classifier
-                        predict_ids, feature = net(x_wav, x_mel, label)
-                    probs = - torch.log_softmax(predict_ids, dim=1).mean(dim=0).squeeze().cpu().numpy()
-                    y_pred[file_idx] = probs[label]
-
-                # compute auc and pAuc
-                max_fpr = 0.1
-                auc = sklearn.metrics.roc_auc_score(y_true, y_pred)
-                p_auc = sklearn.metrics.roc_auc_score(y_true, y_pred, max_fpr=max_fpr)
-                performance.append([auc, p_auc])
-
-            # calculate averages for AUCs and pAUCs
-            averaged_performance = np.mean(np.array(performance, dtype=float), axis=0)
-            mean_auc, mean_p_auc = averaged_performance[0], averaged_performance[1]
-            # print(machine_type, 'AUC_clf:', mean_auc, 'pAUC_clf:', mean_p_auc)
-            sum_auc += mean_auc
-            sum_pauc += mean_p_auc
-
-            time_nedded = time.perf_counter() - start
-            total_time += time_nedded
-            print(f'Test {machine_type} cost {time_nedded} secs')
-        print(f'Total test time: {total_time} secs!')
-        return sum_auc / num, sum_pauc / num
-
-    def test(self, save=True):
-        recore_dict = {}
-        if not save:
-            self.csv_lines = []
-
+    def test(self, save=False, gmm_n=False):
+        """
+            gmm_n if set as number, using GMM estimator (n_components of GMM = gmm_n)
+            if gmm_n = sub_center(arcface), using weight vector of arcface as the mean vector of GMM
+        """
+        csv_lines = []
         sum_auc, sum_pauc, num = 0, 0, 0
-        dirs = utils.select_dirs(self.data_dir, data_type='')
         result_dir = os.path.join(self.args.result_dir, self.args.version)
+        if gmm_n:
+            result_dir = os.path.join(self.args.result_dir, self.args.version, f'GMM-{gmm_n}')
         os.makedirs(result_dir, exist_ok=True)
+        self.net.eval()
+        net = self.net.module if self.args.dp else self.net
         print('\n' + '=' * 20)
-        for index, target_dir in enumerate(sorted(dirs)):
-            time.sleep(1)
-            machine_type = os.path.split(target_dir)[1]
-            if machine_type not in self.args.process_machines:
-                continue
-            num += 1
+        for index, (target_dir, train_dir) in enumerate(zip(sorted(self.args.valid_dirs), sorted(self.args.train_dirs))):
+            machine_type = target_dir.split('/')[-2]
             # result csv
-            self.csv_lines.append([machine_type])
-            self.csv_lines.append(['id', 'AUC', 'pAUC'])
+            csv_lines.append([machine_type])
+            csv_lines.append(['id', 'AUC', 'pAUC'])
             performance = []
             # get machine list
-            machine_id_list = get_machine_id_list(target_dir, dir_name='test')
+            machine_id_list = utils.get_machine_id_list(target_dir)
             for id_str in machine_id_list:
-                test_files, y_true = create_test_file_list(target_dir, id_str, dir_name='test')
-                csv_path = os.path.join(result_dir, f'{machine_type}_anomaly_score_{id_str}.csv')
+                meta = machine_type + '-' + id_str
+                label = self.args.meta2label[meta]
+                test_files, y_true = utils.create_test_file_list(target_dir, id_str, dir_name='test')
+                csv_path = os.path.join(result_dir, f'anomaly_score_{machine_type}_{id_str}.csv')
                 anomaly_score_list = []
                 y_pred = [0. for _ in test_files]
+                if gmm_n:
+                    train_files = utils.get_filename_list(train_dir, pattern=f'normal_{id_str}*')
+                    features = self.get_latent_features(train_files)
+                    means_init = net.arcface.weight[label * gmm_n: (label + 1) * gmm_n, :].detach().cpu().numpy() \
+                        if self.args.use_arcface and (gmm_n == self.args.sub_center) else None
+                    gmm = self.fit_GMM(features, n_components=gmm_n, means_init=means_init)
                 for file_idx, file_path in enumerate(test_files):
-                    x_wav, x_mel, label = self.transform(file_path, machine_type, id_str)
+                    x_wav, x_mel, label = self.transform(file_path)
+                    x_wav, x_mel = x_wav.unsqueeze(0).float().to(self.args.device), x_mel.unsqueeze(0).float().to(
+                        self.args.device)
+                    label = torch.tensor([label]).long().to(self.args.device)
                     with torch.no_grad():
-                        self.classifier.eval()
-                        net = self.classifier.module if self.args.dp else self.classifier
                         predict_ids, feature = net(x_wav, x_mel, label)
-                    probs = - torch.log_softmax(predict_ids, dim=1).mean(dim=0).squeeze().cpu().numpy()
-                    y_pred[file_idx] = probs[label]
+                    if gmm_n:
+                        if self.args.use_arcface: feature = F.normalize(feature).cpu().numpy()
+                        y_pred[file_idx] = - np.max(gmm._estimate_log_prob(feature))
+                    else:
+                        probs = - torch.log_softmax(predict_ids, dim=1).mean(dim=0).squeeze().cpu().numpy()
+                        y_pred[file_idx] = probs[label]
                     anomaly_score_list.append([os.path.basename(file_path), y_pred[file_idx]])
                 if save:
                     utils.save_csv(csv_path, anomaly_score_list)
@@ -219,45 +139,97 @@ class wave_Mel_MFN_trainer(object):
                 max_fpr = 0.1
                 auc = sklearn.metrics.roc_auc_score(y_true, y_pred)
                 p_auc = sklearn.metrics.roc_auc_score(y_true, y_pred, max_fpr=max_fpr)
-                #
-                self.csv_lines.append([id_str.split('_', 1)[1], auc, p_auc])
+                csv_lines.append([id_str.split('_', 1)[1], auc, p_auc])
                 performance.append([auc, p_auc])
 
             # calculate averages for AUCs and pAUCs
             averaged_performance = np.mean(np.array(performance, dtype=float), axis=0)
             mean_auc, mean_p_auc = averaged_performance[0], averaged_performance[1]
-            print(machine_type, 'AUC:', mean_auc, 'pAUC:', mean_p_auc)
-            recore_dict[machine_type] = mean_auc + mean_p_auc
+            self.logger.info(f'{machine_type}\t\tAUC: {mean_auc*100:.3f}\tpAUC: {mean_p_auc*100:.3f}')
+            csv_lines.append(['Average'] + list(averaged_performance))
             sum_auc += mean_auc
             sum_pauc += mean_p_auc
-            self.csv_lines.append(['Average'] + list(averaged_performance))
-        self.csv_lines.append(['Total Average', sum_auc / num, sum_pauc / num])
-        print('Total average:', sum_auc / num, sum_pauc / num)
+            num += 1
+        avg_auc, avg_pauc = sum_auc / num, sum_pauc / num
+        csv_lines.append(['Total Average', avg_auc, avg_pauc])
+        self.logger.info(f'Total average:\t\tAUC: {avg_auc*100:.3f}\tpAUC: {avg_pauc*100:.3f}')
         result_path = os.path.join(result_dir, 'result.csv')
         if save:
-            utils.save_csv(result_path, self.csv_lines)
-        return recore_dict
+            utils.save_csv(result_path, csv_lines)
+        return avg_auc, avg_pauc
 
-    def transform(self, file_path, machine_type, id_str):
-        if machine_type == 'ToyCar' or machine_type == 'ToyConveyor':
-            id = int(id_str[-1]) - 1
-        else:
-            id = int(id_str[-1])
-        label = int(self.id_factor[machine_type] * 7 + id)
-        label = torch.from_numpy(np.array(label)).long().to(self.args.device)
-        (x, _) = librosa.core.load(file_path, sr=self.args.sr, mono=True)
 
-        x_wav = x[None, None, :self.args.sr * 10]  # (1, audio_length)
-        x_wav = torch.from_numpy(x_wav)
-        x_wav = x_wav.float().to(self.args.device)
+    def evaluator(self, save=True, gmm_n=False):
+        result_dir = os.path.join('./evaluator/teams', self.args.version)
+        if gmm_n:
+            result_dir = os.path.join('./evaluator/teams', self.args.version + f'-gmm-{gmm_n}')
+        os.makedirs(result_dir, exist_ok=True)
 
-        x_mel = x[:self.args.sr * 10]  # (1, audio_length)
-        x_mel = torch.from_numpy(x_mel)
-        x_mel = Generator(self.args.sr,
-                          n_fft=self.args.n_fft,
-                          n_mels=self.args.n_mels,
-                          win_length=self.args.win_length,
-                          hop_length=self.args.hop_length,
-                          power=self.args.power,
-                          )(x_mel).unsqueeze(0).unsqueeze(0).to(self.args.device)
-        return x_wav, x_mel, label
+        self.net.eval()
+        net = self.net.module if self.args.dp else self.net
+        print('\n' + '=' * 20)
+        for index, (target_dir, train_dir) in enumerate(zip(sorted(self.args.test_dirs), sorted(self.args.add_dirs))):
+            machine_type = target_dir.split('/')[-2]
+            # get machine list
+            machine_id_list = utils.get_machine_id_list(target_dir)
+            for id_str in machine_id_list:
+                meta = machine_type + '-' + id_str
+                label = self.args.meta2label[meta]
+                test_files = utils.get_filename_list(target_dir, pattern=f'{id_str}*')
+                csv_path = os.path.join(result_dir, f'anomaly_score_{machine_type}_{id_str}.csv')
+                anomaly_score_list = []
+                y_pred = [0. for _ in test_files]
+                if gmm_n:
+                    train_files = utils.get_filename_list(train_dir, pattern=f'normal_{id_str}*')
+                    features = self.get_latent_features(train_files)
+                    means_init = net.arcface.weight[label * gmm_n: (label + 1) * gmm_n, :].detach().cpu().numpy() \
+                        if self.args.use_arcface and (gmm_n == self.args.sub_center) else None
+                    # means_init = None
+                    gmm = self.fit_GMM(features, n_components=gmm_n, means_init=means_init)
+                for file_idx, file_path in enumerate(test_files):
+                    x_wav, x_mel, label = self.transform(file_path)
+                    x_wav, x_mel = x_wav.unsqueeze(0).float().to(self.args.device), x_mel.unsqueeze(0).float().to(
+                        self.args.device)
+                    label = torch.tensor([label]).long().to(self.args.device)
+                    with torch.no_grad():
+                        predict_ids, feature = net(x_wav, x_mel, label)
+                    if gmm_n:
+                        if self.args.use_arcface: feature = F.normalize(feature).cpu().numpy()
+                        y_pred[file_idx] = - np.max(gmm._estimate_log_prob(feature))
+                    else:
+                        probs = - torch.log_softmax(predict_ids, dim=1).mean(dim=0).squeeze().cpu().numpy()
+                        y_pred[file_idx] = probs[label]
+                    anomaly_score_list.append([os.path.basename(file_path), y_pred[file_idx]])
+                if save:
+                    utils.save_csv(csv_path, anomaly_score_list)
+
+    def get_latent_features(self, train_files):
+        pbar = tqdm(enumerate(train_files), total=len(train_files))
+        self.net.eval()
+        classifier = self.net.module if self.args.dp else self.net
+        features = []
+        for file_idx, file_path in pbar:
+            x_wav, x_mel, label = self.transform(file_path)
+            x_wav, x_mel = x_wav.unsqueeze(0).float().to(self.args.device), x_mel.unsqueeze(0).float().to(
+                self.args.device)
+            label = torch.tensor([label]).long().to(self.args.device)
+            with torch.no_grad():
+                _, feature, _ = classifier(x_wav, x_mel, label)
+            if file_idx == 0:
+                features = feature.cpu()
+            else:
+                features = torch.cat((features.cpu(), feature.cpu()), dim=0)
+        if self.args.use_arcface: features = F.normalize(features)
+        return features.numpy()
+
+
+    def fit_GMM(self, data, n_components, means_init=None):
+        print('=' * 40)
+        print('Fit GMM in train data for test...')
+        np.random.seed(self.args.seed)
+        gmm = GaussianMixture(n_components=n_components, covariance_type='full',
+                              means_init=means_init, reg_covar=1e-3, verbose=2)
+        gmm.fit(data)
+        print('Finish GMM fit.')
+        print('=' * 40)
+        return gmm
