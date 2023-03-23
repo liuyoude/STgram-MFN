@@ -4,7 +4,6 @@ The paper is available in [[pdf]](https://ieeexplore.ieee.org/document/9747868).
 ![structure](./structure.png)
 
 ### Installation
-
 ---
 `sh run.sh` or
 ```shell
@@ -15,6 +14,7 @@ $ python run.py
 ```
 
 ### dataset
+---
 [DCASE2020 Task2](https://dcase.community/challenge2020/task-unsupervised-detection-of-anomalous-sounds) Dataset: 
 + [development dataset](https://zenodo.org/record/3678171)
 + [additional training dataset](https://zenodo.org/record/3727685)
@@ -24,9 +24,11 @@ data path can be set in config.yaml
 
 
 ### Model Weights File
+---
 Our trained model weights file for loading can be get in https://zenodo.org/record/7194640#.Y0t1WXZBxD8
 
 ### Result on development dataset
+---
  | machine Type | AUC(%) | pAUC(%) | mAUC(%) |
  | --------     | :-----:| :----:  | :----:  |
  | Fan          | 94.04  | 88.97   | 81.39   |
@@ -83,6 +85,7 @@ Total Average	0.923614376	0.863433498
 ```
  
  ### Cite
+ ---
  If you think this work is useful to you, please cite:
  ```text
 @INPROCEEDINGS{9747868,
