@@ -59,25 +59,34 @@ class ConvBlock(nn.Module):
         else:
             return self.prelu(x)
 
+# original mobilefacenet setting
+# Mobilefacenet_bottleneck_setting = [
+#     # t, c , n ,s
+#     [2, 64, 5, 2],
+#     [4, 128, 1, 2],
+#     [2, 128, 6, 1],
+#     [4, 128, 1, 2],
+#     [2, 128, 2, 1]
+# ]
 
+# Mobilenetv2_bottleneck_setting = [
+#     # t, c, n, s
+#     [1, 16, 1, 1],
+#     [6, 24, 2, 2],
+#     [6, 32, 3, 2],
+#     [6, 64, 4, 2],
+#     [6, 96, 3, 1],
+#     [6, 160, 3, 2],
+#     [6, 320, 1, 1],
+# ]
+
+# refer to DCASE2022 Task2 Top-1
+# https://dcase.community/documents/challenge2022/technical_reports/DCASE2022_Liu_8_t2.pdf
 Mobilefacenet_bottleneck_setting = [
     # t, c , n ,s
-    [2, 64, 5, 2],
-    [4, 128, 1, 2],
-    [2, 128, 6, 1],
-    [4, 128, 1, 2],
-    [2, 128, 2, 1]
-]
-
-Mobilenetv2_bottleneck_setting = [
-    # t, c, n, s
-    [1, 16, 1, 1],
-    [6, 24, 2, 2],
-    [6, 32, 3, 2],
-    [6, 64, 4, 2],
-    [6, 96, 3, 1],
-    [6, 160, 3, 2],
-    [6, 320, 1, 1],
+    [2, 128, 2, 2],
+    [4, 128, 2, 2],
+    [4, 128, 2, 2],
 ]
 
 
